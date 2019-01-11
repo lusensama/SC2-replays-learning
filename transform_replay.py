@@ -10,12 +10,26 @@ import cv2
 import random
 import sc2reader
 import glob
+import time
+import numpy as np
+import os
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("replay_path", None, "Path to a replay files.")
 flags.DEFINE_string("agent", None, "Path to an agent.")
-flags.mark_flag_as_required("replay_path")
-flags.mark_flag_as_required("agent")
+# flags.mark_flag_as_required("replay_path")
+# flags.mark_flag_as_required("agent")
+PATH_REPLAY = 'D:/University_Work/My_research/fixed_replays/Replays'
+
+
+def get_random_steps(length, sample_size):
+    rlist = random.sample(range(length), sample_size)
+    rlist.sort()
+    returnlist = []
+    returnlist.append(rlist[0])
+    for i in range(1, len(rlist)):
+        returnlist.append(rlist[i] - rlist[i - 1])
+    return returnlist
 
 class ReplayEnv:
     def __init__(self,
@@ -25,8 +39,8 @@ class ReplayEnv:
                  screen_size_px=(64, 64),
                  minimap_size_px=(64, 64),
                  discount=1.,
-                 step_mul=8,
-                 version = '4.6.0'):
+                 step_mul=100,
+                 version = '3.16.1'):
 
         self.agent = agent
         self.discount = discount
@@ -40,8 +54,8 @@ class ReplayEnv:
 
         replay_data = self.run_config.replay_data(replay_file_path)
         ping = self.controller.ping()
-        info = self.controller.replay_info(replay_data)
-        if not self._valid_replay(info, ping):
+        self.info = self.controller.replay_info(replay_data)
+        if not self._valid_replay(self.info, ping):
             raise Exception("{} is not a valid replay file!".format(replay_file_path))
 
         screen_size_px = point.Point(*screen_size_px)
@@ -53,10 +67,12 @@ class ReplayEnv:
         minimap_size_px.assign_to(interface.feature_layer.minimap_resolution)
 
         map_data = None
-        if info.local_map_path:
-            map_data = self.run_config.map_data(info.local_map_path)
+        if self.info.local_map_path:
+            map_data = self.run_config.map_data(self.info.local_map_path)
 
-        self._episode_length = info.game_duration_loops
+        self._episode_length = self.info.game_duration_loops
+        if self._episode_length < 2000:
+            raise Exception("Game too short for analysis.")
         self._episode_steps = 0
 
         self.controller.start_replay(sc_pb.RequestStartReplay(
@@ -83,26 +99,98 @@ class ReplayEnv:
 #           return False
         return True
 
-    def get_one_observation(self, replay_path):
+    @staticmethod
+    def extract_features(agent_obs):
+
+        screen = agent_obs['feature_screen']
+        re_screen = np.reshape(screen, (64, 64, 17))
+
+        mini = agent_obs['feature_minimap']
+        re_mini = np.reshape(mini, (64, 64, 7))
+
+        temp = np.zeros(541, dtype='uint')
+        for idx in agent_obs.available_actions:
+            temp[idx] = 1
+        info = np.concatenate((temp, agent_obs['player']), axis=None)
+
+        return re_screen, re_mini, info
+    # def orig(self, replay):
+    #     _features = features.features_from_game_info(self.controller.game_info())
+    #     label = 0
+    #     minimap = []
+    #     screen = []
+    #     non_spatials = []
+    #     counter = 0
+    #     error = 0
+    #     while True:
+    #         self.step_mul = 100
+    #         self.controller.step(self.step_mul)
+    #         obs = self.controller.observe()
+    #         try:
+    #             agent_obs = _features.transform_obs(obs)
+    #             counter +=1
+    #         except:
+    #             error += 1
+    #             print("error ", self._episode_steps, " out of ", self._episode_length, " counter is ", counter, "/", error)
+    #             pass
+    #         img = agent_obs['feature_screen']
+    #         mini = agent_obs['feature_minimap']
+    #
+    #         if obs.player_result:  # Episide over.
+    #             self._state = StepType.LAST
+    #             discount = 0
+    #         else:
+    #             discount = self.discount
+    #
+    #         self._episode_steps += self.step_mul
+    #
+    #         step = TimeStep(step_type=self._state, reward=0,
+    #                         discount=discount, observation=agent_obs)
+    #
+    #         self.agent.step(step, obs.actions)
+    #
+    #         if obs.player_result:
+    #             break
+    #
+    #         self._state = StepType.MID
+    #     return [np.empty([])]
+
+    def orig(self, replay):
+        self.step_mul = 8
         _features = features.features_from_game_info(self.controller.game_info())
         label = 0
-        minimap = []
-        screen = []
-        non_spatials = []
+        minimaps = [np.empty((64,64,7), dtype=np.float32)]
+        screens = [np.empty((64,64,17), dtype=np.float32)]
+        non_spatials = np.empty((1, 541+11), dtype=np.float32)
+        # times = get_random_steps(self._episode_length, 64)
+        times = random.sample(range(self._episode_length), 100)
+        times.sort()
+        print(times)
+        counter = 0
+        error = 0
+        next_time = 0
+        while len(minimaps)<64:
 
-        replay_read = sc2reader.load_replay(replay_path, load_map=True)
-        max_time = replay_read.length.seconds
-        while True:
             self.controller.step(self.step_mul)
             obs = self.controller.observe()
             try:
+
                 agent_obs = _features.transform_obs(obs)
+
+                if times[counter] > self._episode_steps:
+                    screen, minimap, info = extract_features(agent_obs)
+                    screens = np.append(screens, [screen], axis=0)
+                    minimaps = np.append(minimaps, [minimap], axis=0)
+                    non_spatials = np.append(non_spatials, info)
+                counter += 1
             except:
+                error += 1
+                print("error ", self._episode_steps, " out of ", self._episode_length, " counter is ", counter, "/", error)
                 pass
             img = agent_obs['feature_screen']
             mini = agent_obs['feature_minimap']
 
-            if obs.player_result: # Episide over.
+            if obs.player_result:  # Episide over.
                 self._state = StepType.LAST
                 discount = 0
             else:
@@ -119,22 +207,148 @@ class ReplayEnv:
                 break
 
             self._state = StepType.MID
+        return minimaps, screens, non_spatials
+
+    def get_smooth_observation(self, replay_path):
+        _features = features.features_from_game_info(self.controller.game_info())
+        label = 0
+        minimaps = [np.empty((64,64,7), dtype=np.float32)]
+        screens = [np.empty((64,64,17), dtype=np.float32)]
+        non_spatials = np.empty((1, 541+11), dtype=np.float32)
+        X = [np.empty([])]
+        times = get_random_steps(self._episode_length, 64)
+        print(times)
+        for random_jump in times:
+            while True and len(minimaps) < 64:
+                self.step_mul = 20
+                self.controller.step(self.step_mul)
+                obs = self.controller.observe()
+                agent_obs = _features.transform_obs(obs)
+                try:
+                    agent_obs = _features.transform_obs(obs)
+                    # screen, minimap, info = extract_features(agent_obs)
+                    # screens = np.append(screens, [screen], axis=0)
+                    # minimaps = np.append(minimaps, [minimap], axis=0)
+                    # non_spatials = np.append(non_spatials, info)
+                except:
+                    print("Error")
+                    pass
+
+
+                if obs.player_result: # Episide over.
+                    self._state = StepType.LAST
+                    discount = 0
+                else:
+                    discount = self.discount
+
+                self._episode_steps += self.step_mul
+
+                step = TimeStep(step_type=self._state, reward=0,
+                                discount=discount, observation=agent_obs)
+
+                self.agent.step(step, obs.actions)
+
+                if obs.player_result:
+                    break
+
+                self._state = StepType.MID
+
+        self._state = StepType.END
+        X = np.array([minimaps, screens, non_spatials])
+        return X
+
+
+
+
+    def get_one_observation(self, replay_path):
+        _features = features.features_from_game_info(self.controller.game_info())
+        label = 0
+        minimaps = [np.empty((64,64,7), dtype=np.float32)]
+        screens = [np.empty((64,64,17), dtype=np.float32)]
+        non_spatials = np.empty((1, 541+11), dtype=np.float32)
+        X = [np.empty([])]
+        times = get_random_steps(1000, 3)
+        print(times)
+        # replay_read = sc2reader.load_replay(replay_path, load_map=True)
+        for random_jump in times:
+            # self.controller.step(self.step_mul)
+            while random_jump > 40:
+                random_jump -= 40
+                self.controller.step(40)
+                self._episode_steps += 40
+                print(self._episode_steps)
+                obs = self.controller.observe()
+                agent_obs = _features.transform_obs(obs)
+                if obs.player_result:  # Episide over.
+                    self._state = StepType.LAST
+                    discount = 0
+                else:
+                    discount = self.discount
+                step = TimeStep(step_type=self._state, reward=0,
+                                discount=discount, observation=agent_obs)
+
+                self.agent.step(step, obs.actions)
+                self._state = StepType.MID
+
+            self.controller.step(random_jump)
+
+            obs = self.controller.observe()
+
+            # try:
+            agent_obs = _features.transform_obs(obs)
+            screen, minimap, info = extract_features(agent_obs)
+            screens = np.append(screens, [screen], axis=0)
+            minimaps = np.append(minimaps, [minimap], axis=0)
+            non_spatials = np.append(non_spatials, info)
+
+            # X = np.append(X, [screen, mini, non_spatials], axis=0)
+            # except:
+            #     pass
+
+            if obs.player_result: # Episide over.
+                self._state = StepType.LAST
+                discount = 0
+            else:
+                discount = self.discount
+
+            self._episode_steps += random_jump
+            # self._episode_steps += self.step_mul
+
+            time.sleep(1)
+            step = TimeStep(step_type=self._state, reward=0,
+                            discount=discount, observation=agent_obs)
+
+            self.agent.step(step, obs.actions)
+
+            if obs.player_result:
+                break
+
+            self._state = StepType.MID
+        X = np.array([minimaps, screens, non_spatials])
+        return X
 
 def get_label(replay_read):
     if replay_read.winner.number != 1:
         return 0
     return 1
 
-def get64obs(noned):
-    agent_module, agent_name = FLAGS.agent.rsplit(".", 1)
+def get64obs(replay_file):
+    test_replay = os.path.join(PATH_REPLAY, replay_file)
+    print(test_replay)
+    agent_module, agent_name = 'ObserverAgent.ObserverAgent'.rsplit(".", 1)
     agent_cls = getattr(importlib.import_module(agent_module), agent_name)
-    replay_path = 'Blueshift LE (19).SC2Replay'
-    replay_read = sc2reader.load_replay(replay_path, load_map=True)
-    label = get_label(replay_read)
+    # replay_read = sc2reader.load_replay(test_replay)
+    # label = get_label(replay_read)
+    label = 1
     # G_O_O_D_B_O_Y_E = ReplayEnv(FLAGS.replay, agent_cls())
-    G_O_O_D_B_O_Y_E = ReplayEnv('Blueshift LE (19).SC2Replay', agent_cls())
-    return G_O_O_D_B_O_Y_E.get_one_observation(replay_path)
-
+    G_O_O_D_B_O_Y_E = ReplayEnv(test_replay, agent_cls())
+    Xs, Xm, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay)
+    # X = G_O_O_D_B_O_Y_E.get_one_observation(test_replay)
+    if label == 0:
+        Y = np.zeros(3)
+    elif label == 1:
+        Y = np.ones(3)
+    return X, Y
 
 if __name__ == "__main__":
-    app.run(get64obs)
+    app.run(get_smooth_observation)

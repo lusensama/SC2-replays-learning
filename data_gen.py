@@ -8,67 +8,30 @@ from s2clientprotocol import sc2api_pb2 as sc_pb
 import importlib
 import glob
 from transform_replay import *
+import os
 
-
-
-
-class DataGenerator(keras.utils.Sequence):
-    'Generates data for Keras'
-    def __init__(self, list_IDs, labels, batch_size=32, dim=(32,32,32), n_channels=1,
-                 n_classes=10, shuffle=True):
-        'Initialization'
-        self.dim = dim
+class Mygenerator(keras.utils.Sequence):
+    def __init__(self, batch_size, replay_path):
         self.batch_size = batch_size
-        self.labels = labels
-        self.list_IDs = list_IDs
-        self.n_channels = n_channels
-        self.n_classes = n_classes
-        self.shuffle = shuffle
-        self.on_epoch_end()
+        self.replays_path = replay_path
+        self.all_replays = os.listdir(replay_path)
 
+        
     def __len__(self):
-        'Denotes the number of batches per epoch'
-        return int(np.floor(len(self.list_IDs) / self.batch_size))
+        ls = os.listdir(self.replays_path)  # dir is your directory path
+        number_files = len(ls)
+        return int(np.floor(number_files / self.batch_size))
 
-    def __getitem__(self, index):
-        'Generate one batch of data'
-        # Generate indexes of the batch
-        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+    def __getitem__(self, idx):
+        # batch_x = self.x[idx * self.batch_size:(idx + 1) * self.batch_size]
+        # batch_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
 
-        # Find list of IDs
-        list_IDs_temp = [self.list_IDs[k] for k in indexes]
+        # read your data here using the batch lists, batch_x and batch_y
+        # self.printlst()
+        x, y = get64obs(self.all_replays[idx])
 
-        # Generate data
-        X, y = self.__data_generation(list_IDs_temp)
+        return x, y
 
-        return X, y
-
-    def on_epoch_end(self):
-        'Updates indexes after each epoch'
-        self.indexes = np.arange(len(self.list_IDs))
-        if self.shuffle == True:
-            np.random.shuffle(self.indexes)
-
-    def __data_generation(self, list_IDs_temp):
-        moduleName = input('transform_replay')
-        importlib.import_module(moduleName)
-
-        'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
-        # Initialization
-        X = np.empty((self.batch_size, *self.dim, self.n_channels))
-        y = np.empty((self.batch_size), dtype=int)
-
-
-        agent_module, agent_name = FLAGS.agent.rsplit(".", 1)
-        agent_cls = getattr(importlib.import_module(agent_module), agent_name)
-
-
-        # Generate data
-        for i, ID in enumerate(list_IDs_temp):
-            # Store sample
-            X[i,] = np.load('data/' + ID + '.npy')
-
-            # Store class
-            y[i] = self.labels[ID]
-
-        return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
+    # def printlst(self):
+    #     for i in range(5):
+    #         print(self.all_replays[i])

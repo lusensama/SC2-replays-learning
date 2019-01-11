@@ -75,7 +75,7 @@ def build_atari(minimap, screen, info, msize, ssize, num_action):
   return spatial_action, non_spatial_action, value
 
 
-def build_fcn(minimap, screen, info, msize, ssize):
+def build_fcn(minimap, screen, info, msize, ssize, num_action):
   # Extract features
   mconv1 = layers.conv2d(tf.transpose(minimap, [0, 2, 3, 1]),
                          num_outputs=16,
@@ -104,7 +104,13 @@ def build_fcn(minimap, screen, info, msize, ssize):
 
   # Compute spatial actions
   feat_conv = tf.concat([mconv2, sconv2], axis=3)
-
+  spatial_action = layers.conv2d(feat_conv,
+                                 num_outputs=1,
+                                 kernel_size=1,
+                                 stride=1,
+                                 activation_fn=None,
+                                 scope='spatial_action')
+  spatial_action = tf.nn.softmax(layers.flatten(spatial_action))
 
   # Compute non spatial actions and value
   feat_fc = tf.concat([layers.flatten(mconv2), layers.flatten(sconv2), info_fc], axis=1)
@@ -112,10 +118,13 @@ def build_fcn(minimap, screen, info, msize, ssize):
                                    num_outputs=256,
                                    activation_fn=tf.nn.relu,
                                    scope='feat_fc')
-
+  non_spatial_action = layers.fully_connected(feat_fc,
+                                              num_outputs=num_action,
+                                              activation_fn=tf.nn.softmax,
+                                              scope='non_spatial_action')
   value = tf.reshape(layers.fully_connected(feat_fc,
                                             num_outputs=1,
                                             activation_fn=None,
                                             scope='value'), [-1])
 
-  return value
+  return spatial_action, non_spatial_action, value
