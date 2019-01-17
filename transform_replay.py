@@ -15,7 +15,7 @@ import numpy as np
 import os
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("replay_path", None, "Path to a replay files.")
+flags.DEFINE_string("replay_path", 'D:/University_Work/My_research/fixed_replays/Replays', "Path to a replay files.")
 flags.DEFINE_string("agent", None, "Path to an agent.")
 # flags.mark_flag_as_required("replay_path")
 # flags.mark_flag_as_required("agent")
@@ -31,6 +31,20 @@ def get_random_steps(length, sample_size):
         returnlist.append(rlist[i] - rlist[i - 1])
     return returnlist
 
+def extract_features(agent_obs):
+
+    screen = agent_obs['feature_screen']
+    re_screen = np.reshape(screen, (64, 64, 17))
+
+    mini = agent_obs['feature_minimap']
+    re_mini = np.reshape(mini, (64, 64, 7))
+
+    temp = np.zeros(541, dtype='uint')
+    for idx in agent_obs.available_actions:
+        temp[idx] = 1
+    info = np.concatenate((temp, agent_obs['player']), axis=None)
+
+    return re_screen, re_mini, info
 class ReplayEnv:
     def __init__(self,
                  replay_file_path,
@@ -99,21 +113,7 @@ class ReplayEnv:
 #           return False
         return True
 
-    @staticmethod
-    def extract_features(agent_obs):
 
-        screen = agent_obs['feature_screen']
-        re_screen = np.reshape(screen, (64, 64, 17))
-
-        mini = agent_obs['feature_minimap']
-        re_mini = np.reshape(mini, (64, 64, 7))
-
-        temp = np.zeros(541, dtype='uint')
-        for idx in agent_obs.available_actions:
-            temp[idx] = 1
-        info = np.concatenate((temp, agent_obs['player']), axis=None)
-
-        return re_screen, re_mini, info
     # def orig(self, replay):
     #     _features = features.features_from_game_info(self.controller.game_info())
     #     label = 0
@@ -159,36 +159,35 @@ class ReplayEnv:
         self.step_mul = 8
         _features = features.features_from_game_info(self.controller.game_info())
         label = 0
-        minimaps = [np.empty((64,64,7), dtype=np.float32)]
-        screens = [np.empty((64,64,17), dtype=np.float32)]
-        non_spatials = np.empty((1, 541+11), dtype=np.float32)
+        minimaps = [np.empty((64,64,7), dtype=np.int32)]
+        screens = [np.empty((64,64,17), dtype=np.int32)]
+        non_spatials = np.empty((1, 541+11), dtype=np.int32)
         # times = get_random_steps(self._episode_length, 64)
-        times = random.sample(range(self._episode_length), 100)
+        times = random.sample(range(self._episode_length//8), 100)
         times.sort()
         print(times)
         counter = 0
         error = 0
         next_time = 0
         while len(minimaps)<64:
-
+            # self.step_mul = times[counter]
             self.controller.step(self.step_mul)
             obs = self.controller.observe()
             try:
-
-                agent_obs = _features.transform_obs(obs)
-
-                if times[counter] > self._episode_steps:
+                if times[counter]*8 == self._episode_steps:
+                    counter += 1
+                    agent_obs = _features.transform_obs(obs)
                     screen, minimap, info = extract_features(agent_obs)
                     screens = np.append(screens, [screen], axis=0)
                     minimaps = np.append(minimaps, [minimap], axis=0)
-                    non_spatials = np.append(non_spatials, info)
-                counter += 1
+                    non_spatials = np.append(non_spatials, [info], axis=0)
+                else:
+                    agent_obs = _features.transform_obs(obs)
+
             except:
                 error += 1
                 print("error ", self._episode_steps, " out of ", self._episode_length, " counter is ", counter, "/", error)
                 pass
-            img = agent_obs['feature_screen']
-            mini = agent_obs['feature_minimap']
 
             if obs.player_result:  # Episide over.
                 self._state = StepType.LAST
@@ -207,6 +206,9 @@ class ReplayEnv:
                 break
 
             self._state = StepType.MID
+
+        self.sc2_proc.close()
+        print(len(minimaps), ',',len(screens), ',',len(non_spatials))
         return minimaps, screens, non_spatials
 
     def get_smooth_observation(self, replay_path):
@@ -343,12 +345,50 @@ def get64obs(replay_file):
     # G_O_O_D_B_O_Y_E = ReplayEnv(FLAGS.replay, agent_cls())
     G_O_O_D_B_O_Y_E = ReplayEnv(test_replay, agent_cls())
     Xs, Xm, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay)
+    # print(Xs)
     # X = G_O_O_D_B_O_Y_E.get_one_observation(test_replay)
     if label == 0:
         Y = np.zeros(3)
     elif label == 1:
         Y = np.ones(3)
-    return X, Y
+    return [Xs,Xm,Xsp], Y
+
+
+def clean_data(replay_file_path,
+                 version = '3.16.1'):
+
+    def _valid_replay(info, ping):
+        """Make sure the replay isn't corrupt, and is worth looking at."""
+        if (info.HasField("error") or
+                    info.base_build != ping.base_build or  # different game version
+                    info.game_duration_loops < 1000 or
+                    len(info.player_info) != 2):
+            return False
+        return True
+
+    new_path = "D:/University_Work/My_research/fixed_replays/bad_replays/"
+    os.chdir(replay_file_path)
+    all_replays = os.listdir(replay_file_path)
+    run_config = run_configs.get()
+    sc2_proc = run_config.start(version)
+    controller = sc2_proc.controller
+    counter = 0
+    # for replay in reversed(list(glob.glob('*.SC2Replay'))):
+    for i in range(len(all_replays)-26166, 1, -1):
+        print(all_replays[i])
+        # print(counter)
+        old_replay = replay_file_path + all_replays[i]
+        replay_data = run_config.replay_data(old_replay)
+        ping = controller.ping()
+        info = controller.replay_info(replay_data)
+        if not _valid_replay(info, ping):
+            print(counter)
+            new_replay = new_path + all_replays[i]
+            os.rename(old_replay, new_replay)
+            sc2_proc.close()
+
+        counter+=1
 
 if __name__ == "__main__":
+    # clean_data('D:/University_Work/My_research/fixed_replays/Replays/')
     app.run(get_smooth_observation)
