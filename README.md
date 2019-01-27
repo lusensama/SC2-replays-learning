@@ -2,7 +2,7 @@
 
 Built based on [replay observer](https://github.com/narhen/pysc2-replay).
 
-[//]: <> (![Build Status](https://travis-ci.org/joemccann/dillinger.svg?branch=master)
+[//]: <> (![Build Status](https://travis-ci.org/joemccann/dillinger.svg?branch=master))
 
 This program intends to replicate the results described in DeepMind's paper [SC2LE](https://arxiv.org/pdf/1708.04782.pdf) section 5:
   - 65% accuracy in game winner prediction using Fully convolutional (FullyConv) neural network strucure
