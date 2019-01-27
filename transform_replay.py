@@ -77,6 +77,7 @@ class ReplayEnv:
         interface = sc_pb.InterfaceOptions(
             raw=False, score=True,
             feature_layer=sc_pb.SpatialCameraSetup(width=24))
+        sc_pb._PLAYERINFOEXTRA
         screen_size_px.assign_to(interface.feature_layer.resolution)
         minimap_size_px.assign_to(interface.feature_layer.minimap_resolution)
 
@@ -208,8 +209,8 @@ class ReplayEnv:
             self._state = StepType.MID
 
         self.sc2_proc.close()
-        print(len(minimaps), ',',len(screens), ',',len(non_spatials))
-        return minimaps, screens, non_spatials
+        print(minimaps.shape, ',',screens.shape, ',',non_spatials.shape)
+        return minimaps, screens, non_spatials.reshape((non_spatials.shape[0], non_spatials.shape[1], 1))
 
     def get_smooth_observation(self, replay_path):
         _features = features.features_from_game_info(self.controller.game_info())
@@ -339,19 +340,21 @@ def get64obs(replay_file):
     print(test_replay)
     agent_module, agent_name = 'ObserverAgent.ObserverAgent'.rsplit(".", 1)
     agent_cls = getattr(importlib.import_module(agent_module), agent_name)
-    # replay_read = sc2reader.load_replay(test_replay)
-    # label = get_label(replay_read)
-    label = 1
+    replay_read = sc2reader.load_replay(test_replay, load_level=2)
+    label = get_label(replay_read)
+    # label = 1
     # G_O_O_D_B_O_Y_E = ReplayEnv(FLAGS.replay, agent_cls())
     G_O_O_D_B_O_Y_E = ReplayEnv(test_replay, agent_cls())
-    Xs, Xm, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay)
-    # print(Xs)
+    Xm, Xs, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay)
+
     # X = G_O_O_D_B_O_Y_E.get_one_observation(test_replay)
     if label == 0:
-        Y = np.zeros(3)
+        Y = np.zeros(64)
     elif label == 1:
-        Y = np.ones(3)
-    return [Xs,Xm,Xsp], Y
+        Y = np.ones(64)
+
+    return [np.array(Xm), np.array(Xs), np.array(Xsp)], Y
+# out = np.concatenate([minimap[:, :, :, np.newaxis], screen[:, :, :, np.newaxis],non_spatial[:,np.newaxis]], axis=-1)
 
 
 def clean_data(replay_file_path,
@@ -391,4 +394,5 @@ def clean_data(replay_file_path,
 
 if __name__ == "__main__":
     # clean_data('D:/University_Work/My_research/fixed_replays/Replays/')
-    app.run(get_smooth_observation)
+    # app.run(get_smooth_observation)
+    get64obs('D:/University_Work/My_research/fixed_replays/Replays/0a5c9965e576e831feda8e806a51f761dea9fb00cabf0cf8224220bb594cdeab.SC2Replay')
