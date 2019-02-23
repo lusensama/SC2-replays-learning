@@ -17,21 +17,30 @@ class Mygenerator(keras.utils.Sequence):
         self.all_replays = os.listdir(replay_path)
 
         
+    # def __len__(self):
+    #     ls = os.listdir(self.replays_path)  # dir is your directory path
+    #     number_files = len(ls)
+    #     return int(np.floor(number_files / self.batch_size))
     def __len__(self):
         ls = os.listdir(self.replays_path)  # dir is your directory path
         number_files = len(ls)
-        return int(np.floor(number_files / self.batch_size))
+        return number_files
+
 
     def __getitem__(self, idx):
-        # batch_x = self.x[idx * self.batch_size:(idx + 1) * self.batch_size]
-        # batch_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
+        # x, y = get64obs(self.all_replays[idx])
+        # data = np.load("{0}/testmdata{1}.npz".format(self.replays_path, str(idx)))
+        data = np.load('./replay_data/'+ self.all_replays[idx])
 
-        # read your data here using the batch lists, batch_x and batch_y
-        # self.printlst()
-        x, y = get64obs(self.all_replays[idx])
-
-        return x, y
+        x = [data['name1'], data['name2'], data['name3']]
+        if data['name1'].shape[0] !=64 or data['name2'].shape[0] !=64 or data['name3'].shape[0] !=64:
+            print(self.all_replays[idx])
+            print("error")
+        y = data['name4']
+        # np.savez("testmdata{0}.npz".format(str(idx)), name1=x[0], name2=x[1], name3=[2], name4=y)
+        return [x[0][32:], x[1][32:], x[2][32:]], y[32:]
 
     # def printlst(self):
     #     for i in range(5):
     #         print(self.all_replays[i])
+

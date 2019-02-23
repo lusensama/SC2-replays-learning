@@ -13,13 +13,15 @@ import glob
 import time
 import numpy as np
 import os
+import pickle
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("replay_path", 'D:/University_Work/My_research/fixed_replays/Replays', "Path to a replay files.")
 flags.DEFINE_string("agent", None, "Path to an agent.")
 # flags.mark_flag_as_required("replay_path")
 # flags.mark_flag_as_required("agent")
-PATH_REPLAY = 'D:/University_Work/My_research/fixed_replays/Replays'
+# PATH_REPLAY = 'D:/University_Work/My_research/fixed_replays/Replays'
+PATH_REPLAY = 'D:/University_Work/My_research/get_data/pysc2-replay/test'
 
 
 def get_random_steps(length, sample_size):
@@ -86,7 +88,7 @@ class ReplayEnv:
             map_data = self.run_config.map_data(self.info.local_map_path)
 
         self._episode_length = self.info.game_duration_loops
-        if self._episode_length < 2000:
+        if self._episode_length < 1000:
             raise Exception("Game too short for analysis.")
         self._episode_steps = 0
 
@@ -159,23 +161,25 @@ class ReplayEnv:
     def orig(self, replay):
         self.step_mul = 8
         _features = features.features_from_game_info(self.controller.game_info())
-        label = 0
         minimaps = [np.empty((64,64,7), dtype=np.int32)]
         screens = [np.empty((64,64,17), dtype=np.int32)]
         non_spatials = np.empty((1, 541+11), dtype=np.int32)
         # times = get_random_steps(self._episode_length, 64)
-        times = random.sample(range(self._episode_length//8), 100)
+        try:
+            times = random.sample(range(self._episode_length//16), 70)
+        except ValueError:
+            return np.zeros((1,2)),np.zeros((1,2)),np.zeros((1,2))
+        halfway = self._episode_length//2 - (self._episode_length//2)%8
         times.sort()
         print(times)
         counter = 0
         error = 0
-        next_time = 0
         while len(minimaps)<64:
             # self.step_mul = times[counter]
             self.controller.step(self.step_mul)
             obs = self.controller.observe()
             try:
-                if times[counter]*8 == self._episode_steps:
+                if times[counter]*8 + halfway == self._episode_steps:
                     counter += 1
                     agent_obs = _features.transform_obs(obs)
                     screen, minimap, info = extract_features(agent_obs)
@@ -187,10 +191,11 @@ class ReplayEnv:
 
             except:
                 error += 1
-                print("error ", self._episode_steps, " out of ", self._episode_length, " counter is ", counter, "/", error)
+                # print("error ", self._episode_steps, " out of ", self._episode_length, " counter is ", counter, "/", error)
                 pass
 
             if obs.player_result:  # Episide over.
+                print("game ended")
                 self._state = StepType.LAST
                 discount = 0
             else:
@@ -209,7 +214,7 @@ class ReplayEnv:
             self._state = StepType.MID
 
         self.sc2_proc.close()
-        print(minimaps.shape, ',',screens.shape, ',',non_spatials.shape)
+        # print(minimaps.shape, ',',screens.shape, ',',non_spatials.shape)
         return minimaps, screens, non_spatials.reshape((non_spatials.shape[0], non_spatials.shape[1], 1))
 
     def get_smooth_observation(self, replay_path):
@@ -331,9 +336,12 @@ class ReplayEnv:
         return X
 
 def get_label(replay_read):
-    if replay_read.winner.number != 1:
-        return 0
-    return 1
+    try:
+        if replay_read.winner.number != 1:
+            return 0
+        return 1
+    except AttributeError:
+        return 1
 
 def get64obs(replay_file):
     test_replay = os.path.join(PATH_REPLAY, replay_file)
@@ -352,11 +360,49 @@ def get64obs(replay_file):
         Y = np.zeros(64)
     elif label == 1:
         Y = np.ones(64)
-
+    # print(Y.shape)
     return [np.array(Xm), np.array(Xs), np.array(Xsp)], Y
 # out = np.concatenate([minimap[:, :, :, np.newaxis], screen[:, :, :, np.newaxis],non_spatial[:,np.newaxis]], axis=-1)
 
+def preprocess_ob(path_to_replays, path_to_npz):
+    replays = os.listdir(path_to_replays)
+    counter, idx = 0, 163
+    while counter <= 7000:
+        next_replay = os.path.join(path_to_replays, replays[idx])
+        if os.path.isfile("{0}/testmdata{1}.npz".format(path_to_npz, str(idx))):
+            counter+=1
+            pass
+        else:
+            print("Obtaining index " + str(idx))
+            x, y = get64obs(next_replay)
+            try:
+                if x[0].shape[0] !=64 or x[1].shape[0] !=64 or x[2].shape[0] !=64:
+                    print("error")
+                else:
+                    np.savez("{0}/testmdata{1}.npz".format(path_to_npz, str(idx)), name1=x[0], name2=x[1], name3=x[2], name4=y)
+                    counter+=1
+            except ValueError:
+                pass
+        idx+=1
 
+def process_to_pickle(path_to_replays, path_to_pickle):
+    replays = os.listdir(path_to_replays)
+    for idx in range(len(replays)):
+        next_replay = os.path.join(path_to_replays, replays[idx])
+        x, y = get64obs(next_replay)
+        if x[0].shape[0] != 64 or x[1].shape[0] != 64 or x[2].shape[0] != 64:
+            print("error at " + replays[idx])
+        else:
+            example_dict = {1: x, 2:y}
+            pickle_out = open(path_to_pickle+"test.pickle", "wb")
+            pickle.dump(example_dict, pickle_out)
+            pickle_out.close()
+            pickle_in = open(path_to_pickle+"test.pickle", "rb")
+            example_dict = pickle.load(pickle_in)
+            x = example_dict[0]
+            x1 = x[0]
+            y = example_dict[1]
+    return
 def clean_data(replay_file_path,
                  version = '3.16.1'):
 
@@ -392,7 +438,11 @@ def clean_data(replay_file_path,
 
         counter+=1
 
+
+
+
 if __name__ == "__main__":
     # clean_data('D:/University_Work/My_research/fixed_replays/Replays/')
     # app.run(get_smooth_observation)
-    get64obs('D:/University_Work/My_research/fixed_replays/Replays/0a5c9965e576e831feda8e806a51f761dea9fb00cabf0cf8224220bb594cdeab.SC2Replay')
+    # get64obs('D:/University_Work/My_research/fixed_replays/Replays/0a5c9965e576e831feda8e806a51f761dea9fb00cabf0cf8224220bb594cdeab.SC2Replay')
+    preprocess_ob('D:/University_Work/My_research/fixed_replays/Replays/', 'D:/University_Work/My_research/get_data/pysc2-replay/replay_data/')
