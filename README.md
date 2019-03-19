@@ -9,8 +9,11 @@ This program intends to replicate the results described in DeepMind's paper [SC2
 # Main Features
 
   - All built in Keras
-  - A funtion to clean up replays that are of different versions, extremely short, and corrupted
-  - Replicating FullyConv network structure and simple LSTM training results
+  - A function to clean up replays that are of different versions, extremely short, and corrupted
+  - A function to extract replay data into .npz file for faster training.
+  - Check the balance of replay outcomes
+  - A replica of FullyConv network structure by DeepMind in Keras
+  - A custom LSTM network to predict game outcome 
   - A data-generator that can run in parallel to speed up the training process
 
 
