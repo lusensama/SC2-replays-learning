@@ -158,32 +158,34 @@ class ReplayEnv:
     #         self._state = StepType.MID
     #     return [np.empty([])]
 
-    def orig(self, replay):
+    def orig(self, replay, size_watned):
         self.step_mul = 8
         _features = features.features_from_game_info(self.controller.game_info())
-        minimaps = [np.empty((64,64,7), dtype=np.int32)]
-        screens = [np.empty((64,64,17), dtype=np.int32)]
-        non_spatials = np.empty((1, 541+11), dtype=np.int32)
+        minimaps = [np.zeros((64,64,7), dtype=np.int32)]
+        screens = [np.zeros((64,64,17), dtype=np.int32)]
+        non_spatials = np.zeros((1, 541+11), dtype=np.int32)
         # times = get_random_steps(self._episode_length, 64)
         try:
-            times = random.sample(range(self._episode_length//16), 70)
+            times = random.sample(range(self._episode_length//8), size_watned+10)
         except ValueError:
             return np.zeros((1,2)),np.zeros((1,2)),np.zeros((1,2))
-        halfway = self._episode_length//2 - (self._episode_length//2)%8
+        # halfway = self._episode_length//3 - (self._episode_length//3)%8
+        # halfway = 0
         times.sort()
         print(times)
         counter = 0
         error = 0
-        while len(minimaps)<64:
+        while len(minimaps)<size_watned+1:
             # self.step_mul = times[counter]
             self.controller.step(self.step_mul)
             obs = self.controller.observe()
             try:
-                if times[counter]*8 + halfway == self._episode_steps:
+                if times[counter]*8 == self._episode_steps:
                     counter += 1
                     agent_obs = _features.transform_obs(obs)
                     screen, minimap, info = extract_features(agent_obs)
                     screens = np.append(screens, [screen], axis=0)
+
                     minimaps = np.append(minimaps, [minimap], axis=0)
                     non_spatials = np.append(non_spatials, [info], axis=0)
                 else:
@@ -215,7 +217,7 @@ class ReplayEnv:
 
         self.sc2_proc.close()
         # print(minimaps.shape, ',',screens.shape, ',',non_spatials.shape)
-        return minimaps, screens, non_spatials.reshape((non_spatials.shape[0], non_spatials.shape[1], 1))
+        return minimaps[1:], screens[1:], non_spatials.reshape((non_spatials.shape[0], non_spatials.shape[1], 1))[1:]
 
     def get_smooth_observation(self, replay_path):
         _features = features.features_from_game_info(self.controller.game_info())
@@ -341,9 +343,10 @@ def get_label(replay_read):
             return 0
         return 1
     except AttributeError:
+        print("incomplete replay")
         return 1
 
-def get64obs(replay_file):
+def get64obs(replay_file, size_watned):
     test_replay = os.path.join(PATH_REPLAY, replay_file)
     print(test_replay)
     agent_module, agent_name = 'ObserverAgent.ObserverAgent'.rsplit(".", 1)
@@ -353,30 +356,31 @@ def get64obs(replay_file):
     # label = 1
     # G_O_O_D_B_O_Y_E = ReplayEnv(FLAGS.replay, agent_cls())
     G_O_O_D_B_O_Y_E = ReplayEnv(test_replay, agent_cls())
-    Xm, Xs, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay)
+    Xm, Xs, Xsp = G_O_O_D_B_O_Y_E.orig(test_replay, size_watned)
 
     # X = G_O_O_D_B_O_Y_E.get_one_observation(test_replay)
     if label == 0:
-        Y = np.zeros(64)
+        Y = np.zeros(size_watned)
     elif label == 1:
-        Y = np.ones(64)
+        Y = np.ones(size_watned)
     # print(Y.shape)
     return [np.array(Xm), np.array(Xs), np.array(Xsp)], Y
 # out = np.concatenate([minimap[:, :, :, np.newaxis], screen[:, :, :, np.newaxis],non_spatial[:,np.newaxis]], axis=-1)
 
 def preprocess_ob(path_to_replays, path_to_npz):
     replays = os.listdir(path_to_replays)
-    counter, idx = 0, 163
-    while counter <= 7000:
+    counter, idx = 0, 7980
+    size_watned = 64
+    while counter <= 1000:
         next_replay = os.path.join(path_to_replays, replays[idx])
         if os.path.isfile("{0}/testmdata{1}.npz".format(path_to_npz, str(idx))):
             counter+=1
             pass
         else:
             print("Obtaining index " + str(idx))
-            x, y = get64obs(next_replay)
+            x, y = get64obs(next_replay, size_watned)
             try:
-                if x[0].shape[0] !=64 or x[1].shape[0] !=64 or x[2].shape[0] !=64:
+                if x[0].shape[0] !=size_watned or x[1].shape[0] !=size_watned or x[2].shape[0] !=size_watned:
                     print("error")
                 else:
                     np.savez("{0}/testmdata{1}.npz".format(path_to_npz, str(idx)), name1=x[0], name2=x[1], name3=x[2], name4=y)
@@ -438,11 +442,39 @@ def clean_data(replay_file_path,
 
         counter+=1
 
-
+def check_data_balance(replay_path):
+    all_replay = os.listdir(replay_path)
+    total = len(all_replay)
+    winCounter, lossCounter = 0, 0
+    for replay in all_replay:
+        data = np.load(replay_path + replay)
+        y = data['name4']
+        if y[0] == 1:
+            winCounter += 1
+        else:
+            lossCounter += 1
+    print("total win: {0}, Total loss: {1}, winRate: {2}, total: {3}".format(str(winCounter), str(lossCounter), str(winCounter/total), str(total)))
 
 
 if __name__ == "__main__":
     # clean_data('D:/University_Work/My_research/fixed_replays/Replays/')
     # app.run(get_smooth_observation)
-    # get64obs('D:/University_Work/My_research/fixed_replays/Replays/0a5c9965e576e831feda8e806a51f761dea9fb00cabf0cf8224220bb594cdeab.SC2Replay')
+    # get64obs('D:/University_Work/My_research/fixed_replays/Replays/0a5c9965e576e831feda8e806a51f761dea9fb00cabf0cf8224220bb594cdeab.SC2Replay', 10)
     preprocess_ob('D:/University_Work/My_research/fixed_replays/Replays/', 'D:/University_Work/My_research/get_data/pysc2-replay/replay_data/')
+    # check_data_balance('D:/University_Work/My_research/get_data/pysc2-replay/pick_data/')
+    # check_data_balance('D:/University_Work/My_research/get_data/pysc2-replay/extra/')
+    # path = './pick_data/'
+    # path2 = './replay_data/'
+    # replays = os.listdir(path2)
+    # for x in replays:
+    #     data = np.load(path2+ x)
+    #     x1 = data['name1']
+    #     x2 = data['name2']
+    #     x3 = data['name3']
+    #     if x1[0].all() == x1[-1].all():
+    #         print("Error0")
+    #     if x2[0].all() == x2[-1].all():
+    #         print("Error1")
+    #     if x3[0].all() == x3[-1].all():
+    #         print("Error2")
+        # print(y[0])
